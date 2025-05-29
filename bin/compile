@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+BUILD_DIR=$1
+CACHE_DIR=$2
+
+# Ruby and Bundler versions
+RUBY_VERSION=2.6.6
+BUNDLER_VERSION=1.17.3
+
+# Download Ruby 2.6.6 binary from Heroku's old buildpack S3 or build if not found
+RUBY_URL="https://heroku-buildpack-ruby.s3.us-east-1.amazonaws.com/cedar-14/ruby-2.6.6.tgz"
+RUBY_INSTALL_DIR="$BUILD_DIR/.heroku/ruby"
+
+mkdir -p "$RUBY_INSTALL_DIR"
+
+curl -sSL "$RUBY_URL" | tar -xz -C "$RUBY_INSTALL_DIR" --strip-components=1 || {
+  echo "Failed to download Ruby 2.6.6 binary. Please provide a valid binary for your stack." >&2
+  exit 1
+}
+
+# Add Ruby to PATH
+export PATH="$RUBY_INSTALL_DIR/bin:$PATH"
+
+# Install Bundler 1.17.3
+if ! command -v bundler &>/dev/null || [[ "$(bundler --version)" != *"$BUNDLER_VERSION"* ]]; then
+  gem install bundler -v "$BUNDLER_VERSION" --no-document
+fi
+
+# Write .ruby-version and .bundle/config for the build
+mkdir -p "$BUILD_DIR/.bundle"
+echo "$RUBY_VERSION" > "$BUILD_DIR/.ruby-version"
+echo -e "---\nBUNDLE_PATH: vendor/bundle\nBUNDLE_DISABLE_SHARED_GEMS: '1'\n" > "$BUILD_DIR/.bundle/config"
+
+# Install gems
+cd "$BUILD_DIR"
+bundle _${BUNDLER_VERSION}_ install --path=vendor/bundle --without development test || {
+  echo "Bundler install failed" >&2
+  exit 1
+}
+
+exit 0
