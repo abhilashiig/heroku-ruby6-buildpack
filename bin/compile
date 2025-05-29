@@ -19,42 +19,76 @@ mkdir -p "$CACHE_DIR/ruby"
 # Download and install Ruby
 echo "-----> Downloading Ruby $RUBY_VERSION"
 
-# Try multiple sources for Ruby binaries
-RUBY_URLS=(
-  "https://heroku-buildpack-ruby.s3.us-east-1.amazonaws.com/heroku-24/ruby-$RUBY_VERSION.tgz"
-  "https://heroku-buildpack-ruby.s3.us-east-1.amazonaws.com/heroku-22/ruby-$RUBY_VERSION.tgz"
-  "https://heroku-buildpack-ruby.s3.us-east-1.amazonaws.com/heroku-20/ruby-$RUBY_VERSION.tgz"
-  "https://heroku-buildpack-ruby.s3.us-east-1.amazonaws.com/cedar-14/ruby-$RUBY_VERSION.tgz"
-)
+# Use official Ruby source
+RUBY_SOURCE_URL="https://cache.ruby-lang.org/pub/ruby/2.6/ruby-$RUBY_VERSION.tar.gz"
+RUBY_SOURCE_DIR="$CACHE_DIR/ruby/source"
+RUBY_BUILD_DIR="$CACHE_DIR/ruby/build"
 
 RUBY_INSTALLED=false
 
-# Try to use cached version first
-CACHED_RUBY="$CACHE_DIR/ruby/ruby-$RUBY_VERSION.tgz"
+# Try to use cached compiled Ruby first
+CACHED_RUBY="$CACHE_DIR/ruby/ruby-$RUBY_VERSION-compiled.tar.gz"
 if [ -f "$CACHED_RUBY" ]; then
-  echo "-----> Using cached Ruby $RUBY_VERSION"
+  echo "-----> Using cached compiled Ruby $RUBY_VERSION"
   tar -xzf "$CACHED_RUBY" -C "$RUBY_INSTALL_DIR" --strip-components=1
   RUBY_INSTALLED=true
 else
-  # Try each URL until one works
-  for RUBY_URL in "${RUBY_URLS[@]}"; do
-    echo "-----> Trying $RUBY_URL"
-    if curl -sSL "$RUBY_URL" -o ruby.tgz && [ -s ruby.tgz ]; then
-      # Cache the downloaded file
-      mkdir -p "$CACHE_DIR/ruby"
-      cp ruby.tgz "$CACHED_RUBY"
-      
-      # Extract Ruby
-      tar -xzf ruby.tgz -C "$RUBY_INSTALL_DIR" --strip-components=1
-      rm ruby.tgz
-      RUBY_INSTALLED=true
-      break
+  echo "-----> Downloading Ruby $RUBY_VERSION source from $RUBY_SOURCE_URL"
+  mkdir -p "$RUBY_SOURCE_DIR" "$RUBY_BUILD_DIR"
+  
+  # Download Ruby source
+  if curl -sSL "$RUBY_SOURCE_URL" -o ruby-source.tar.gz && [ -s ruby-source.tar.gz ]; then
+    echo "-----> Extracting Ruby source"
+    tar -xzf ruby-source.tar.gz -C "$RUBY_SOURCE_DIR" --strip-components=1
+    rm ruby-source.tar.gz
+    
+    # Install build dependencies
+    echo "-----> Installing build dependencies"
+    apt_deps="libssl-dev libreadline-dev zlib1g-dev autoconf bison build-essential libyaml-dev libreadline-dev libncurses5-dev libffi-dev libgdbm-dev"
+    
+    # Check if we can install dependencies
+    if command -v apt-get >/dev/null; then
+      apt-get update -qq
+      apt-get install -qq -y $apt_deps > /dev/null 2>&1 || echo "-----> Warning: Could not install all build dependencies. Compilation may fail."
+    else
+      echo "-----> Warning: apt-get not available. Build dependencies may be missing."
     fi
-  done
+    
+    echo "-----> Configuring and compiling Ruby $RUBY_VERSION (this may take a few minutes)"
+    cd "$RUBY_SOURCE_DIR"
+    
+    # Configure with prefix set to the Ruby install directory
+    ./configure --prefix="$RUBY_INSTALL_DIR" --disable-install-doc --enable-shared > "$BUILD_DIR/ruby-configure.log" 2>&1 || {
+      echo "-----> Ruby configure failed. See $BUILD_DIR/ruby-configure.log for details."
+      exit 1
+    }
+    
+    # Compile Ruby
+    make -j$(nproc) > "$BUILD_DIR/ruby-make.log" 2>&1 || {
+      echo "-----> Ruby compilation failed. See $BUILD_DIR/ruby-make.log for details."
+      exit 1
+    }
+    
+    # Install Ruby
+    make install > "$BUILD_DIR/ruby-install.log" 2>&1 || {
+      echo "-----> Ruby installation failed. See $BUILD_DIR/ruby-install.log for details."
+      exit 1
+    }
+    
+    # Create a tarball of the compiled Ruby for future use
+    echo "-----> Caching compiled Ruby for future builds"
+    mkdir -p "$CACHE_DIR/ruby"
+    cd "$RUBY_INSTALL_DIR"
+    tar -czf "$CACHED_RUBY" .
+    
+    RUBY_INSTALLED=true
+  else
+    echo "-----> Failed to download Ruby $RUBY_VERSION source."
+  fi
 fi
 
 if [ "$RUBY_INSTALLED" = false ]; then
-  echo "Failed to download Ruby $RUBY_VERSION binary. Please provide a valid binary for your stack." >&2
+  echo "Failed to install Ruby $RUBY_VERSION. See logs for details." >&2
   exit 1
 fi
 

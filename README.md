@@ -14,9 +14,9 @@ This buildpack installs Ruby 2.6.6 and Bundler 1.17.3 regardless of Heroku stack
 
 ## Features
 
-- Compatible with Heroku-24, Heroku-22, Heroku-20, and Cedar-14 stacks
-- Tries multiple Ruby binary sources to ensure compatibility
-- Caches Ruby installation for faster subsequent builds
+- Uses the official Ruby source from ruby-lang.org
+- Compiles Ruby 2.6.6 from source for maximum compatibility with all Heroku stacks
+- Caches compiled Ruby for faster subsequent builds
 - Verifies Ruby and Bundler installations before proceeding
 - Detailed logging for easier debugging
 
@@ -24,17 +24,22 @@ This buildpack installs Ruby 2.6.6 and Bundler 1.17.3 regardless of Heroku stack
 
 This buildpack:
 
-1. Attempts to download Ruby 2.6.6 from multiple Heroku S3 sources
-2. Caches the Ruby binary for future builds
-3. Verifies the Ruby installation is working correctly
-4. Installs Bundler 1.17.3
-5. Configures the application with the correct Ruby and Bundler settings
-6. Installs dependencies using Bundler
+1. Attempts to use a cached compiled version of Ruby 2.6.6 if available
+2. If no cached version exists, downloads the official Ruby 2.6.6 source from ruby-lang.org
+3. Installs necessary build dependencies
+4. Compiles Ruby from source with optimized settings
+5. Caches the compiled Ruby for future builds
+6. Verifies the Ruby installation is working correctly
+7. Installs Bundler 1.17.3
+8. Configures the application with the correct Ruby and Bundler settings
+9. Installs dependencies using Bundler
 
 ## Troubleshooting
 
 If you encounter issues:
 
 - Check the build logs for detailed error messages
+- Review the Ruby compilation logs (`ruby-configure.log`, `ruby-make.log`, and `ruby-install.log`) in your build directory
 - Ensure your `Gemfile` and `Gemfile.lock` are compatible with Ruby 2.6.6 and Bundler 1.17.3
-- If Ruby binary download fails, the buildpack will try alternative sources
+- If the build is taking too long, subsequent builds will be faster due to caching
+- For compilation issues, you may need to add specific build dependencies to your app
