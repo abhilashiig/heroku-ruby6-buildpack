@@ -42,36 +42,45 @@ else
     tar -xzf ruby-source.tar.gz -C "$RUBY_SOURCE_DIR" --strip-components=1
     rm ruby-source.tar.gz
     
-    # Install build dependencies
-    echo "-----> Installing build dependencies"
-    apt_deps="libssl-dev libreadline-dev zlib1g-dev autoconf bison build-essential libyaml-dev libreadline-dev libncurses5-dev libffi-dev libgdbm-dev"
-    
-    # Check if we can install dependencies
-    if command -v apt-get >/dev/null; then
-      apt-get update -qq
-      apt-get install -qq -y $apt_deps > /dev/null 2>&1 || echo "-----> Warning: Could not install all build dependencies. Compilation may fail."
-    else
-      echo "-----> Warning: apt-get not available. Build dependencies may be missing."
-    fi
+    # Check for build dependencies
+    echo "-----> Checking for build dependencies"
+    for cmd in gcc make autoconf; do
+      if ! command -v $cmd >/dev/null; then
+        echo "-----> Warning: $cmd not found. Compilation may fail."
+      fi
+    done
     
     echo "-----> Configuring and compiling Ruby $RUBY_VERSION (this may take a few minutes)"
     cd "$RUBY_SOURCE_DIR"
     
-    # Configure with prefix set to the Ruby install directory
-    ./configure --prefix="$RUBY_INSTALL_DIR" --disable-install-doc --enable-shared > "$BUILD_DIR/ruby-configure.log" 2>&1 || {
+    # Configure with prefix set to the Ruby install directory and minimal dependencies
+    echo "-----> Configuring Ruby with minimal dependencies"
+    ./configure \
+      --prefix="$RUBY_INSTALL_DIR" \
+      --disable-install-doc \
+      --disable-install-rdoc \
+      --disable-install-capi \
+      --without-gmp \
+      --with-out-ext=tk,sdbm,gdbm,dbm,win32,win32ole \
+      --without-X11 > "$BUILD_DIR/ruby-configure.log" 2>&1 || {
       echo "-----> Ruby configure failed. See $BUILD_DIR/ruby-configure.log for details."
+      cat "$BUILD_DIR/ruby-configure.log"
       exit 1
     }
     
-    # Compile Ruby
-    make -j$(nproc) > "$BUILD_DIR/ruby-make.log" 2>&1 || {
+    # Compile Ruby with a single thread to avoid memory issues
+    echo "-----> Compiling Ruby (this may take a few minutes)"
+    make > "$BUILD_DIR/ruby-make.log" 2>&1 || {
       echo "-----> Ruby compilation failed. See $BUILD_DIR/ruby-make.log for details."
+      cat "$BUILD_DIR/ruby-make.log"
       exit 1
     }
     
     # Install Ruby
+    echo "-----> Installing Ruby"
     make install > "$BUILD_DIR/ruby-install.log" 2>&1 || {
       echo "-----> Ruby installation failed. See $BUILD_DIR/ruby-install.log for details."
+      cat "$BUILD_DIR/ruby-install.log"
       exit 1
     }
     
@@ -85,6 +94,31 @@ else
   else
     echo "-----> Failed to download Ruby $RUBY_VERSION source."
   fi
+fi
+
+# Fallback to pre-compiled binaries if compilation failed
+if [ "$RUBY_INSTALLED" = false ]; then
+  echo "-----> Compilation failed, trying pre-compiled Ruby binaries as fallback"
+  
+  # Try multiple sources for Ruby binaries
+  RUBY_URLS=(
+    "https://heroku-buildpack-ruby.s3.us-east-1.amazonaws.com/heroku-24/ruby-$RUBY_VERSION.tgz"
+    "https://heroku-buildpack-ruby.s3.us-east-1.amazonaws.com/heroku-22/ruby-$RUBY_VERSION.tgz"
+    "https://heroku-buildpack-ruby.s3.us-east-1.amazonaws.com/heroku-20/ruby-$RUBY_VERSION.tgz"
+    "https://heroku-buildpack-ruby.s3.us-east-1.amazonaws.com/cedar-14/ruby-$RUBY_VERSION.tgz"
+  )
+  
+  # Try each URL until one works
+  for RUBY_URL in "${RUBY_URLS[@]}"; do
+    echo "-----> Trying $RUBY_URL"
+    if curl -sSL "$RUBY_URL" -o ruby.tgz && [ -s ruby.tgz ]; then
+      # Extract Ruby
+      tar -xzf ruby.tgz -C "$RUBY_INSTALL_DIR" --strip-components=1
+      rm ruby.tgz
+      RUBY_INSTALLED=true
+      break
+    fi
+  done
 fi
 
 if [ "$RUBY_INSTALLED" = false ]; then

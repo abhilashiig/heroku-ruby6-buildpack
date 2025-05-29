@@ -14,8 +14,9 @@ This buildpack installs Ruby 2.6.6 and Bundler 1.17.3 regardless of Heroku stack
 
 ## Features
 
-- Uses the official Ruby source from ruby-lang.org
-- Compiles Ruby 2.6.6 from source for maximum compatibility with all Heroku stacks
+- Primarily uses the official Ruby source from ruby-lang.org
+- Compiles Ruby 2.6.6 from source with minimal dependencies
+- Falls back to pre-compiled binaries if compilation fails
 - Caches compiled Ruby for faster subsequent builds
 - Verifies Ruby and Bundler installations before proceeding
 - Detailed logging for easier debugging
@@ -26,13 +27,15 @@ This buildpack:
 
 1. Attempts to use a cached compiled version of Ruby 2.6.6 if available
 2. If no cached version exists, downloads the official Ruby 2.6.6 source from ruby-lang.org
-3. Installs necessary build dependencies
-4. Compiles Ruby from source with optimized settings
-5. Caches the compiled Ruby for future builds
-6. Verifies the Ruby installation is working correctly
-7. Installs Bundler 1.17.3
-8. Configures the application with the correct Ruby and Bundler settings
-9. Installs dependencies using Bundler
+3. Checks for essential build tools (gcc, make, autoconf)
+4. Configures Ruby with minimal dependencies to avoid reliance on system packages
+5. Compiles Ruby from source with optimized settings
+6. If compilation fails, falls back to pre-compiled Heroku binaries
+7. Caches the Ruby installation for future builds
+8. Verifies the Ruby installation is working correctly
+9. Installs Bundler 1.17.3
+10. Configures the application with the correct Ruby and Bundler settings
+11. Installs dependencies using Bundler
 
 ## Troubleshooting
 
