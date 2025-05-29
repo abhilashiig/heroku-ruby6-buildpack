@@ -1,28 +1,89 @@
 #!/usr/bin/env bash
+set -e # Exit immediately if a command exits with a non-zero status
+
 BUILD_DIR=$1
 CACHE_DIR=$2
+ENV_DIR=$3
+
+echo "-----> Installing Ruby and Bundler"
 
 # Ruby and Bundler versions
 RUBY_VERSION=2.6.6
 BUNDLER_VERSION=1.17.3
 
-# Download Ruby 2.6.6 binary from Heroku's old buildpack S3 or build if not found
-RUBY_URL="https://heroku-buildpack-ruby.s3.us-east-1.amazonaws.com/cedar-14/ruby-2.6.6.tgz"
+# Create directories
 RUBY_INSTALL_DIR="$BUILD_DIR/.heroku/ruby"
-
 mkdir -p "$RUBY_INSTALL_DIR"
+mkdir -p "$CACHE_DIR/ruby"
 
-curl -sSL "$RUBY_URL" | tar -xz -C "$RUBY_INSTALL_DIR" --strip-components=1 || {
-  echo "Failed to download Ruby 2.6.6 binary. Please provide a valid binary for your stack." >&2
+# Download and install Ruby
+echo "-----> Downloading Ruby $RUBY_VERSION"
+
+# Try multiple sources for Ruby binaries
+RUBY_URLS=(
+  "https://heroku-buildpack-ruby.s3.us-east-1.amazonaws.com/heroku-24/ruby-$RUBY_VERSION.tgz"
+  "https://heroku-buildpack-ruby.s3.us-east-1.amazonaws.com/heroku-22/ruby-$RUBY_VERSION.tgz"
+  "https://heroku-buildpack-ruby.s3.us-east-1.amazonaws.com/heroku-20/ruby-$RUBY_VERSION.tgz"
+  "https://heroku-buildpack-ruby.s3.us-east-1.amazonaws.com/cedar-14/ruby-$RUBY_VERSION.tgz"
+)
+
+RUBY_INSTALLED=false
+
+# Try to use cached version first
+CACHED_RUBY="$CACHE_DIR/ruby/ruby-$RUBY_VERSION.tgz"
+if [ -f "$CACHED_RUBY" ]; then
+  echo "-----> Using cached Ruby $RUBY_VERSION"
+  tar -xzf "$CACHED_RUBY" -C "$RUBY_INSTALL_DIR" --strip-components=1
+  RUBY_INSTALLED=true
+else
+  # Try each URL until one works
+  for RUBY_URL in "${RUBY_URLS[@]}"; do
+    echo "-----> Trying $RUBY_URL"
+    if curl -sSL "$RUBY_URL" -o ruby.tgz && [ -s ruby.tgz ]; then
+      # Cache the downloaded file
+      mkdir -p "$CACHE_DIR/ruby"
+      cp ruby.tgz "$CACHED_RUBY"
+      
+      # Extract Ruby
+      tar -xzf ruby.tgz -C "$RUBY_INSTALL_DIR" --strip-components=1
+      rm ruby.tgz
+      RUBY_INSTALLED=true
+      break
+    fi
+  done
+fi
+
+if [ "$RUBY_INSTALLED" = false ]; then
+  echo "Failed to download Ruby $RUBY_VERSION binary. Please provide a valid binary for your stack." >&2
   exit 1
-}
+fi
 
-# Add Ruby to PATH
+# Add Ruby to PATH and verify it works
 export PATH="$RUBY_INSTALL_DIR/bin:$PATH"
+echo "-----> Ruby path: $RUBY_INSTALL_DIR/bin"
 
-# Install Bundler 1.17.3
-if ! command -v bundler &>/dev/null || [[ "$(bundler --version)" != *"$BUNDLER_VERSION"* ]]; then
+# Verify Ruby installation
+if command -v ruby >/dev/null; then
+  ruby_version=$(ruby -v)
+  echo "-----> Ruby version: $ruby_version"
+else
+  echo "-----> Ruby command not found in PATH: $PATH" >&2
+  exit 1
+fi
+
+# Install Bundler
+echo "-----> Installing Bundler version $BUNDLER_VERSION"
+if ! command -v bundler &>/dev/null || [[ "$(bundler --version 2>/dev/null || echo '')" != *"$BUNDLER_VERSION"* ]]; then
   gem install bundler -v "$BUNDLER_VERSION" --no-document
+fi
+
+# Verify Bundler installation
+if command -v bundler >/dev/null; then
+  bundler_version=$(bundler --version)
+  echo "-----> Bundler version: $bundler_version"
+else
+  echo "-----> Bundler command not found" >&2
+  exit 1
 fi
 
 # Write .ruby-version and .bundle/config for the build
@@ -31,10 +92,12 @@ echo "$RUBY_VERSION" > "$BUILD_DIR/.ruby-version"
 echo -e "---\nBUNDLE_PATH: vendor/bundle\nBUNDLE_DISABLE_SHARED_GEMS: '1'\n" > "$BUILD_DIR/.bundle/config"
 
 # Install gems
+echo "-----> Installing dependencies using Bundler version $BUNDLER_VERSION"
 cd "$BUILD_DIR"
 bundle _${BUNDLER_VERSION}_ install --path=vendor/bundle --without development test || {
   echo "Bundler install failed" >&2
   exit 1
 }
 
+echo "-----> Bundle installation completed successfully"
 exit 0
